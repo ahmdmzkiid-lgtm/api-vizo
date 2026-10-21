@@ -1,0 +1,302 @@
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  KETUA_KELAS
+  PJ_MATKUL
+  MAHASISWA
+}
+
+enum QuestionType {
+  MULTIPLE_CHOICE
+  SHORT_ANSWER
+  ESSAY
+}
+
+enum MaterialType {
+  PDF
+  SLIDE
+  VIDEO_LINK
+  DRIVE_LINK
+  NOTE
+  OTHER
+}
+
+model User {
+  id           Int      @id @default(autoincrement())
+  nim          String   @unique
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         Role     @default(MAHASISWA)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  coordinatedCourses CourseCoordinator[]
+  uploadedMaterials  Material[]
+  createdAssignments Assignment[]
+  submissions        Submission[]
+  quizContributions  QuizContribution[]
+  createdQuestions   Question[]
+  quizAttempts       QuizAttempt[]
+  createdAgendas     ClassAgenda[]
+
+  @@map("users")
+}
+
+model Course {
+  id              Int      @id @default(autoincrement())
+  code            String   @unique
+  name            String
+  semester        Int
+  credits         Int      @default(3)
+  lecturerName    String
+  lecturerContact String?
+  scheduleDay     String?  // Hari perkuliahan reguler (Senin, etc.)
+  scheduleTime    String?  // Jam perkuliahan reguler (08:00 - 10:30)
+  room            String?  @default("Ruang Kuliah") // Ruangan perkuliahan
+  description     String?  @db.Text
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  coordinators CourseCoordinator[]
+  sessions     Session[]
+  assignments  Assignment[]
+  reschedules  ClassReschedule[]
+  practicums   PracticumSchedule[]
+  quizContributions QuizContribution[]
+  questions         Question[]
+  quizAttempts      QuizAttempt[]
+
+  @@map("courses")
+}
+
+model CourseCoordinator {
+  id         Int      @id @default(autoincrement())
+  courseId   Int
+  userId     Int
+  assignedAt DateTime @default(now())
+
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([courseId, userId])
+  @@map("course_coordinators")
+}
+
+model ClassReschedule {
+  id           Int       @id @default(autoincrement())
+  courseId     Int
+  originalDate DateTime?
+  newDate      DateTime  // Tanggal kuliah pengganti
+  newStartTime String    // Jam mulai baru (misal: "13:00")
+  newEndTime   String?   // Jam selesai baru (misal: "15:30")
+  newRoom      String?   // Ruangan baru (misal: "Lab Komputer 02")
+  reason       String?   @db.Text // Alasan pemindahan jadwal
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@map("class_reschedules")
+}
+
+model PracticumSchedule {
+  id           Int       @id @default(autoincrement())
+  courseId     Int?
+  title        String
+  day          String?   // Hari berulang (Senin, etc.)
+  date         DateTime? // Tanggal tertentu (jika bukan berulang mingguan)
+  startTime    String    // Jam mulai (misal: "13:00")
+  endTime      String?   // Jam selesai (misal: "15:30")
+  room         String    @default("Lab Komputer")
+  assistant    String?   // Nama asisten laboratorium / dosen lab
+  group        String?   // Shift/kelompok (misal: "Shift 1", "Kelompok A")
+  notes        String?   @db.Text // Catatan / materi / tugas awal praktikum
+  isRecurring  Boolean   @default(true) // true = berulang tiap minggu pada `day`, false = tanggal spesifik pada `date`
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  course Course? @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@map("practicum_schedules")
+}
+
+model Session {
+  id            Int       @id @default(autoincrement())
+  courseId      Int
+  sessionNumber Int
+  topicTitle    String
+  notes         String?   @db.Text
+  sessionDate   DateTime?
+  createdAt     DateTime  @default(now())
+
+  course            Course             @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  materials         Material[]
+  quizContributions QuizContribution[]
+  questions         Question[]
+
+  @@unique([courseId, sessionNumber])
+  @@map("sessions")
+}
+
+model Material {
+  id           Int          @id @default(autoincrement())
+  sessionId    Int
+  title        String
+  type         MaterialType @default(PDF)
+  r2Key        String?
+  fileUrl      String       @db.Text
+  fileSize     BigInt?
+  uploadedById Int
+  createdAt    DateTime     @default(now())
+
+  session           Session            @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  uploadedBy        User               @relation(fields: [uploadedById], references: [id])
+  quizContributions QuizContribution[]
+
+  @@map("materials")
+}
+
+model Assignment {
+  id              Int      @id @default(autoincrement())
+  courseId        Int
+  title           String
+  description     String   @db.Text
+  deadline        DateTime
+  r2AttachmentKey String?
+  attachmentUrl   String?  @db.Text
+  isCollective    Boolean  @default(false)
+  createdById     Int
+  createdAt       DateTime @default(now())
+
+  course      Course       @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  createdBy   User         @relation(fields: [createdById], references: [id])
+  submissions Submission[]
+
+  @@map("assignments")
+}
+
+model Submission {
+  id              Int      @id @default(autoincrement())
+  assignmentId    Int
+  userId          Int
+  r2SubmissionKey String?
+  fileUrl         String   @db.Text
+  note            String?  @db.Text
+  submittedAt     DateTime @default(now())
+
+  assignment Assignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([assignmentId, userId])
+  @@map("submissions")
+}
+
+model Announcement {
+  id        Int      @id @default(autoincrement())
+  title     String
+  content   String   @db.Text
+  isUrgent  Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@map("announcements")
+}
+
+model ClassAgenda {
+  id          Int      @id @default(autoincrement())
+  title       String   // Judul agenda (misal: "Rapat Angkatan", "Seminar AI", "Buka Bersama")
+  category    String   @default("UMUM") // "RAPAT", "SEMINAR", "KEGIATAN_KELAS", "ACARA_KAMPUS", "LAINNYA"
+  date        DateTime // Tanggal kegiatan
+  startTime   String   // Misal "14:00"
+  endTime     String?  // Misal "16:00"
+  location    String   @default("Ruang Kelas / Online") // Ruangan / Tempat / Link Meet
+  description String?  @db.Text // Deskripsi / Agenda pembahasan / Keterangan
+  createdById Int
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  createdBy User @relation(fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@map("class_agendas")
+}
+
+model QuizContribution {
+  id         Int      @id @default(autoincrement())
+  courseId   Int
+  sessionId  Int
+  materialId Int?
+  userId     Int
+  startPage  Int
+  endPage    Int
+  notes      String?  @db.Text
+  isVerified Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  course    Course     @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  session   Session    @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  material  Material?  @relation(fields: [materialId], references: [id], onDelete: SetNull)
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  questions Question[]
+
+  @@map("quiz_contributions")
+}
+
+model Question {
+  id             Int          @id @default(autoincrement())
+  contributionId Int
+  sessionId      Int
+  courseId       Int
+  createdById    Int
+  type           QuestionType @default(MULTIPLE_CHOICE)
+  questionText   String       @db.Text
+  pageReference  Int?
+  options        Json?        // Array string untuk PG misal ["A...", "B...", "C...", "D..."]
+  correctAnswer  String?      @db.Text // Pilihan benar (misal "A") atau keyword isian singkat
+  explanation    String?      @db.Text // Pembahasan dari slide
+  essayRubric    String?      @db.Text // Kunci model jawaban untuk essay
+  createdAt      DateTime     @default(now())
+
+  contribution QuizContribution @relation(fields: [contributionId], references: [id], onDelete: Cascade)
+  session      Session          @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  course       Course           @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  createdBy    User             @relation(fields: [createdById], references: [id])
+  quizAnswers  QuizAnswer[]
+
+  @@map("questions")
+}
+
+model QuizAttempt {
+  id          Int          @id @default(autoincrement())
+  courseId    Int
+  sessionId   Int?
+  userId      Int
+  totalScore  Float        @default(0)
+  totalItems  Int          @default(0)
+  completedAt DateTime     @default(now())
+
+  course  Course       @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  user    User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  answers QuizAnswer[]
+
+  @@map("quiz_attempts")
+}
+
+model QuizAnswer {
+  id         Int      @id @default(autoincrement())
+  attemptId  Int
+  questionId Int
+  userAnswer String   @db.Text
+  isCorrect  Boolean?
+
+  attempt  QuizAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  question Question    @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@map("quiz_answers")
+}
