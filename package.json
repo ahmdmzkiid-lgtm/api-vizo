@@ -25,5 +25,19 @@
   "devDependencies": {
     "nodemon": "^3.1.9",
     "prisma": "^6.4.1"
+  },
+  "pnpm": {
+    "allowBuilds": {
+      "@prisma/client": true,
+      "@prisma/engines": true,
+      "prisma": true,
+      "bcryptjs": true
+    },
+    "onlyBuiltDependencies": [
+      "@prisma/client",
+      "@prisma/engines",
+      "prisma",
+      "bcryptjs"
+    ]
   }
 }
