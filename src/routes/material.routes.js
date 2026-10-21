@@ -2,7 +2,7 @@ import express from 'express';
 import multer from 'multer';
 import slugify from 'slugify';
 import prisma from '../lib/prisma.js';
-import { uploadToR2, deleteFromR2, getDownloadUrl } from '../lib/r2.js';
+import { uploadToR2, deleteFromR2, getDownloadUrl, getFileStream } from '../lib/r2.js';
 import { authenticateToken, canManageCourse } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -79,6 +79,48 @@ router.post(
     }
   }
 );
+
+// GET /api/materials/:id/view - Stream or proxy material file for in-app preview or direct browser viewing
+router.get('/:id/view', authenticateToken, async (req, res) => {
+  try {
+    const materialId = Number(req.params.id);
+    const material = await prisma.material.findUnique({
+      where: { id: materialId },
+    });
+
+    if (!material) {
+      return res.status(404).send('Materi tidak ditemukan.');
+    }
+
+    const isDownload = req.query.download === 'true' || req.query.download === '1';
+    const dispositionType = isDownload ? 'attachment' : 'inline';
+    const safeTitle = (material.title || 'document').replace(/[/\\?%*:|"<>]/g, '_');
+
+    if (material.r2Key) {
+      try {
+        const streamData = await getFileStream(material.r2Key);
+        res.setHeader('Content-Type', streamData.ContentType || 'application/pdf');
+        res.setHeader('Content-Disposition', `${dispositionType}; filename="${encodeURIComponent(safeTitle)}.pdf"`);
+        if (streamData.ContentLength) {
+          res.setHeader('Content-Length', streamData.ContentLength);
+        }
+        return streamData.Body.pipe(res);
+      } catch (streamErr) {
+        console.error('Error streaming material from R2:', streamErr);
+      }
+    }
+
+    // Fallback: If external URL or stream failed
+    if (material.fileUrl) {
+      return res.redirect(material.fileUrl);
+    }
+
+    return res.status(404).send('File materi tidak ditemukan.');
+  } catch (error) {
+    console.error('View material error:', error);
+    return res.status(500).send('Gagal memuat file materi.');
+  }
+});
 
 // GET /api/materials/:id/download - Get signed or direct download link
 router.get('/:id/download', authenticateToken, async (req, res) => {

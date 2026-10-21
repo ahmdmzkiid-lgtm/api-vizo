@@ -56,6 +56,22 @@ export async function uploadToR2(buffer, key, contentType) {
 }
 
 /**
+ * Stream an object directly from Cloudflare R2
+ */
+export async function getFileStream(key) {
+  if (!isR2Configured || !r2Client) {
+    throw new Error('R2 client is not configured.');
+  }
+
+  const command = new GetObjectCommand({
+    Bucket: bucketName,
+    Key: key,
+  });
+
+  return await r2Client.send(command);
+}
+
+/**
  * Generate a Presigned Download URL (or Public direct link)
  */
 export async function getDownloadUrl(key, expiresIn = 3600) {
