@@ -157,11 +157,18 @@ router.get('/:id/view', authenticateToken, async (req, res) => {
         return streamData.Body.pipe(res);
       } catch (streamErr) {
         console.error('Error streaming material from R2:', streamErr);
+        // Fallback: try presigned URL redirect instead of dead public URL
+        try {
+          const presignedUrl = await getDownloadUrl(material.r2Key);
+          return res.redirect(presignedUrl);
+        } catch (presignErr) {
+          console.error('Presigned URL fallback also failed:', presignErr);
+        }
       }
     }
 
-    // Fallback: If external URL or stream failed
-    if (material.fileUrl) {
+    // Fallback: If external URL (non-R2 links like Google Drive, YouTube)
+    if (material.fileUrl && !material.r2Key) {
       return res.redirect(material.fileUrl);
     }
 

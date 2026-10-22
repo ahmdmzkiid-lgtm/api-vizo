@@ -72,13 +72,10 @@ export async function getFileStream(key) {
 }
 
 /**
- * Generate a Presigned Download URL (or Public direct link)
+ * Generate a Presigned Download URL
+ * Always uses S3 presigned URL for reliability (public R2 URLs can be disabled/unstable).
  */
 export async function getDownloadUrl(key, expiresIn = 3600) {
-  if (publicUrl) {
-    return `${publicUrl.replace(/\/$/, '')}/${key}`;
-  }
-
   if (!isR2Configured || !r2Client) {
     return `/uploads/mock/${key}`;
   }
