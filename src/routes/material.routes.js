@@ -80,6 +80,47 @@ router.post(
   }
 );
 
+// Helper: derive file extension from R2 key or material type
+function getFileExtension(r2Key, materialType) {
+  if (r2Key) {
+    const ext = r2Key.split('.').pop();
+    if (ext && ext.length <= 10 && ext !== r2Key) return `.${ext}`;
+  }
+  const typeMap = {
+    PDF: '.pdf',
+    SLIDE: '.pptx',
+    OTHER: '',
+    VIDEO_LINK: '',
+    DRIVE_LINK: '',
+    NOTE: '.txt',
+  };
+  return typeMap[materialType] || '';
+}
+
+// Helper: derive Content-Type from R2 key extension
+function getMimeType(r2Key) {
+  if (!r2Key) return 'application/octet-stream';
+  const ext = r2Key.split('.').pop().toLowerCase();
+  const mimeMap = {
+    pdf: 'application/pdf',
+    ppt: 'application/vnd.ms-powerpoint',
+    pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    doc: 'application/msword',
+    docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    xls: 'application/vnd.ms-excel',
+    xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    zip: 'application/zip',
+    rar: 'application/x-rar-compressed',
+    txt: 'text/plain',
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    png: 'image/png',
+    gif: 'image/gif',
+    mp4: 'video/mp4',
+  };
+  return mimeMap[ext] || 'application/octet-stream';
+}
+
 // GET /api/materials/:id/view - Stream or proxy material file for in-app preview or direct browser viewing
 router.get('/:id/view', authenticateToken, async (req, res) => {
   try {
@@ -95,15 +136,24 @@ router.get('/:id/view', authenticateToken, async (req, res) => {
     const isDownload = req.query.download === 'true' || req.query.download === '1';
     const dispositionType = isDownload ? 'attachment' : 'inline';
     const safeTitle = (material.title || 'document').replace(/[/\\?%*:|"<>]/g, '_');
+    const fileExt = getFileExtension(material.r2Key, material.type);
 
     if (material.r2Key) {
       try {
         const streamData = await getFileStream(material.r2Key);
-        res.setHeader('Content-Type', streamData.ContentType || 'application/pdf');
-        res.setHeader('Content-Disposition', `${dispositionType}; filename="${encodeURIComponent(safeTitle)}.pdf"`);
+        const contentType = streamData.ContentType || getMimeType(material.r2Key);
+        res.setHeader('Content-Type', contentType);
+        res.setHeader('Content-Disposition', `${dispositionType}; filename="${encodeURIComponent(safeTitle)}${fileExt}"`);
         if (streamData.ContentLength) {
           res.setHeader('Content-Length', streamData.ContentLength);
         }
+        // Handle stream errors to prevent unhandled crashes
+        streamData.Body.on('error', (err) => {
+          console.error('R2 stream error:', err);
+          if (!res.headersSent) {
+            res.status(500).send('Gagal streaming file dari storage.');
+          }
+        });
         return streamData.Body.pipe(res);
       } catch (streamErr) {
         console.error('Error streaming material from R2:', streamErr);
