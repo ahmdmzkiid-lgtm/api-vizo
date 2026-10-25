@@ -1,5 +1,5 @@
 datasource db {
-  provider = "mysql"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -261,6 +261,8 @@ model Question {
   correctAnswer  String?      @db.Text // Pilihan benar (misal "A") atau keyword isian singkat
   explanation    String?      @db.Text // Pembahasan dari slide
   essayRubric    String?      @db.Text // Kunci model jawaban untuk essay
+  aiExplanation  String?      @db.Text // Cache pembahasan AI
+  aiExplainedAt  DateTime?            // Kapan AI generate pembahasan
   createdAt      DateTime     @default(now())
 
   contribution QuizContribution @relation(fields: [contributionId], references: [id], onDelete: Cascade)

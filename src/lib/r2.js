@@ -72,14 +72,19 @@ export async function getFileStream(key) {
 }
 
 /**
- * Generate a Presigned Download URL
- * Always uses S3 presigned URL for reliability (public R2 URLs can be disabled/unstable).
+ * Generate a Download URL (public custom domain or presigned fallback)
  */
 export async function getDownloadUrl(key, expiresIn = 3600) {
+  // Use public custom domain if configured (faster, no expiry)
+  if (publicUrl) {
+    return `${publicUrl.replace(/\/$/, '')}/${key}`;
+  }
+
   if (!isR2Configured || !r2Client) {
     return `/uploads/mock/${key}`;
   }
 
+  // Fallback to presigned URL
   const command = new GetObjectCommand({
     Bucket: bucketName,
     Key: key,

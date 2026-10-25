@@ -1,6 +1,7 @@
 import express from 'express';
 import prisma from '../lib/prisma.js';
 import { authenticateToken } from '../middleware/auth.js';
+import { streamExplanation, checkRateLimit } from '../lib/ai.js';
 
 const router = express.Router();
 
@@ -323,6 +324,7 @@ router.post('/submit-attempt', authenticateToken, async (req, res) => {
         correctAnswer: q.correctAnswer,
         explanation: q.explanation,
         essayRubric: q.essayRubric,
+        aiExplanation: q.aiExplanation,
         options: q.options,
         isCorrect,
         session: q.session,
@@ -500,6 +502,7 @@ router.get('/courses/:courseId/attempts/my', authenticateToken, async (req, res)
           correctAnswer: q.correctAnswer,
           explanation: q.explanation,
           essayRubric: q.essayRubric,
+          aiExplanation: q.aiExplanation,
           userAnswer: ans.userAnswer,
           isCorrect: ans.isCorrect,
           session: q.session,
@@ -576,6 +579,7 @@ router.get('/attempts/:id', authenticateToken, async (req, res) => {
         correctAnswer: q.correctAnswer,
         explanation: q.explanation,
         essayRubric: q.essayRubric,
+        aiExplanation: q.aiExplanation,
         userAnswer: ans.userAnswer,
         isCorrect: ans.isCorrect,
         session: q.session,
@@ -599,6 +603,105 @@ router.get('/attempts/:id', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Get attempt detail error:', error);
     return res.status(500).json({ message: 'Gagal memuat detail riwayat latihan.' });
+  }
+});
+
+/**
+ * POST /api/quiz/questions/:questionId/explain
+ * Generate pembahasan AI secara streaming (SSE).
+ * Jika sudah ada cache, langsung return tanpa panggil AI.
+ */
+router.post('/questions/:questionId/explain', authenticateToken, async (req, res) => {
+  try {
+    const questionId = Number(req.params.questionId);
+    const { userAnswer, isCorrect, regenerate } = req.body;
+
+    // Rate limit check
+    if (!checkRateLimit(req.user.id)) {
+      return res.status(429).json({
+        message: 'Terlalu banyak permintaan. Coba lagi dalam 1 menit.',
+      });
+    }
+
+    // Fetch question dengan relasi
+    const question = await prisma.question.findUnique({
+      where: { id: questionId },
+      include: {
+        session: { select: { id: true, sessionNumber: true, topicTitle: true } },
+        contribution: { select: { id: true, startPage: true, endPage: true } },
+      },
+    });
+
+    if (!question) {
+      return res.status(404).json({ message: 'Soal tidak ditemukan.' });
+    }
+
+    // Jika sudah ada cache AI explanation dan bukan regenerate, return langsung (bukan SSE)
+    if (question.aiExplanation && !regenerate) {
+      return res.json({
+        cached: true,
+        explanation: question.aiExplanation,
+        explainedAt: question.aiExplainedAt,
+      });
+    }
+
+    // Setup SSE streaming
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+
+    const questionData = {
+      type: question.type,
+      questionText: question.questionText,
+      options: question.options,
+      correctAnswer: question.correctAnswer,
+      userAnswer,
+      isCorrect,
+      pageReference: question.pageReference,
+      explanation: question.explanation,
+      essayRubric: question.essayRubric,
+      sessionInfo: question.session,
+    };
+
+    let fullText = '';
+
+    try {
+      for await (const chunk of streamExplanation(questionData)) {
+        fullText += chunk;
+        res.write(`data: ${JSON.stringify({ token: chunk })}\n\n`);
+      }
+
+      if (fullText.trim().length > 0) {
+        await prisma.question.update({
+          where: { id: questionId },
+          data: {
+            aiExplanation: fullText,
+            aiExplainedAt: new Date(),
+          },
+        });
+      }
+
+      res.write(`data: ${JSON.stringify({ done: true, full: fullText })}\n\n`);
+      res.end();
+    } catch (streamError) {
+      console.error('AI stream error:', streamError);
+      res.write(
+        `data: ${JSON.stringify({
+          error: true,
+          message: 'Gagal memuat pembahasan AI. Coba lagi nanti.',
+        })}\n\n`
+      );
+      res.end();
+    }
+  } catch (error) {
+    console.error('AI explain error:', error);
+    if (!res.headersSent) {
+      return res.status(500).json({ message: 'Gagal memuat pembahasan AI.' });
+    }
+    res.end();
   }
 });
 

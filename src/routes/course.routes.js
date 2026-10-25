@@ -15,9 +15,9 @@ router.get('/', authenticateToken, async (req, res) => {
     }
     if (search) {
       where.OR = [
-        { name: { contains: search } },
-        { code: { contains: search } },
-        { lecturerName: { contains: search } },
+        { name: { contains: search, mode: 'insensitive' } },
+        { code: { contains: search, mode: 'insensitive' } },
+        { lecturerName: { contains: search, mode: 'insensitive' } },
       ];
     }
 

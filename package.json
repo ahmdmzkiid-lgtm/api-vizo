@@ -19,25 +19,12 @@
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "jsonwebtoken": "^9.0.2",
-    "multer": "^1.4.5-lts.1",
+    "multer": "^2.0.0",
+    "openai": "^7.42.0",
     "slugify": "^1.6.6"
   },
   "devDependencies": {
     "nodemon": "^3.1.9",
     "prisma": "^6.4.1"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "@prisma/client",
-      "@prisma/engines",
-      "prisma",
-      "bcryptjs"
-    ],
-    "allowBuilds": {
-      "@prisma/client": true,
-      "@prisma/engines": true,
-      "prisma": true,
-      "bcryptjs": true
-    }
   }
 }
