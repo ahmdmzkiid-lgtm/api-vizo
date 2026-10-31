@@ -223,7 +223,7 @@ router.put('/change-password', authenticateToken, async (req, res) => {
   }
 });
 
-// Get All Users (for assigning PJ Matkul)
+// Get All Users (for assigning PJ Matkul & Bendahara)
 router.get('/users', authenticateToken, async (req, res) => {
   try {
     const users = await prisma.user.findMany({
@@ -233,6 +233,13 @@ router.get('/users', authenticateToken, async (req, res) => {
         name: true,
         email: true,
         role: true,
+        coordinatedCourses: {
+          select: {
+            course: {
+              select: { id: true, code: true, name: true },
+            },
+          },
+        },
       },
       orderBy: { name: 'asc' },
     });
@@ -250,20 +257,224 @@ router.put('/users/:id/role', authenticateToken, requireRole('KETUA_KELAS'), asy
     const userId = Number(req.params.id);
     const { role } = req.body;
 
-    if (!['KETUA_KELAS', 'PJ_MATKUL', 'MAHASISWA'].includes(role)) {
+    if (!['KETUA_KELAS', 'BENDAHARA', 'PJ_MATKUL', 'MAHASISWA'].includes(role)) {
       return res.status(400).json({ message: 'Peran tidak valid.' });
+    }
+
+    let targetRole = role;
+    // Jika dikembalikan ke MAHASISWA tapi user tersebut masih menjadi PJ Matkul, pertahankan role PJ_MATKUL
+    if (role === 'MAHASISWA') {
+      const coordCount = await prisma.courseCoordinator.count({
+        where: { userId },
+      });
+      if (coordCount > 0) {
+        targetRole = 'PJ_MATKUL';
+      }
     }
 
     const updated = await prisma.user.update({
       where: { id: userId },
-      data: { role },
-      select: { id: true, name: true, role: true },
+      data: { role: targetRole },
+      select: { id: true, nim: true, name: true, email: true, role: true },
     });
 
     return res.json({ message: 'Peran pengguna berhasil diperbarui.', user: updated });
   } catch (error) {
     console.error('Update role error:', error);
     return res.status(500).json({ message: 'Gagal memperbarui peran.' });
+  }
+});
+
+// Create New Class Member (Ketua Kelas only)
+router.post('/users', authenticateToken, requireRole('KETUA_KELAS'), async (req, res) => {
+  try {
+    const { nim, name, email, role, password } = req.body;
+
+    if (!nim || !String(nim).trim() || !name || !String(name).trim()) {
+      return res.status(400).json({ message: 'NIM/NPM dan Nama Lengkap wajib diisi.' });
+    }
+
+    const cleanNim = String(nim).trim();
+    const cleanName = String(name).trim();
+    const cleanEmail =
+      email && String(email).trim()
+        ? String(email).trim().toLowerCase()
+        : `${cleanNim}@student.gunadarma.ac.id`;
+
+    const existing = await prisma.user.findFirst({
+      where: {
+        OR: [{ nim: cleanNim }, { email: cleanEmail }],
+      },
+    });
+
+    if (existing) {
+      return res.status(400).json({
+        message: 'Mahasiswa dengan NIM/NPM atau Email tersebut sudah terdaftar.',
+      });
+    }
+
+    const rawPassword = password && String(password).trim().length >= 6 ? String(password).trim() : 'password123';
+    const passwordHash = await bcrypt.hash(rawPassword, 10);
+
+    const validRole = ['KETUA_KELAS', 'BENDAHARA', 'PJ_MATKUL', 'MAHASISWA'].includes(role)
+      ? role
+      : 'MAHASISWA';
+
+    const created = await prisma.user.create({
+      data: {
+        nim: cleanNim,
+        name: cleanName,
+        email: cleanEmail,
+        passwordHash,
+        role: validRole,
+      },
+      select: {
+        id: true,
+        nim: true,
+        name: true,
+        email: true,
+        role: true,
+        createdAt: true,
+      },
+    });
+
+    return res.status(201).json({
+      message: `Anggota kelas ${created.name} berhasil ditambahkan (Password: ${rawPassword}).`,
+      user: created,
+    });
+  } catch (error) {
+    console.error('Admin create user error:', error);
+    return res.status(500).json({ message: 'Gagal menambahkan anggota kelas baru.' });
+  }
+});
+
+// Edit Class Member Profile & Role (Ketua Kelas only)
+router.put('/users/:id', authenticateToken, requireRole('KETUA_KELAS'), async (req, res) => {
+  try {
+    const userId = Number(req.params.id);
+    const { nim, name, email, role } = req.body;
+
+    const existing = await prisma.user.findUnique({ where: { id: userId } });
+    if (!existing) {
+      return res.status(404).json({ message: 'Anggota kelas tidak ditemukan.' });
+    }
+
+    const cleanNim = nim ? String(nim).trim() : existing.nim;
+    const cleanName = name ? String(name).trim() : existing.name;
+    const cleanEmail = email ? String(email).trim().toLowerCase() : existing.email;
+
+    if (cleanNim !== existing.nim || cleanEmail !== existing.email) {
+      const duplicate = await prisma.user.findFirst({
+        where: {
+          id: { not: userId },
+          OR: [{ nim: cleanNim }, { email: cleanEmail }],
+        },
+      });
+      if (duplicate) {
+        return res.status(400).json({
+          message: 'NIM/NPM atau Email sudah digunakan oleh anggota kelas lain.',
+        });
+      }
+    }
+
+    let targetRole = existing.role;
+    if (role && ['KETUA_KELAS', 'BENDAHARA', 'PJ_MATKUL', 'MAHASISWA'].includes(role)) {
+      targetRole = role;
+      if (role === 'MAHASISWA') {
+        const coordCount = await prisma.courseCoordinator.count({ where: { userId } });
+        if (coordCount > 0) targetRole = 'PJ_MATKUL';
+      }
+    }
+
+    const updated = await prisma.user.update({
+      where: { id: userId },
+      data: {
+        nim: cleanNim,
+        name: cleanName,
+        email: cleanEmail,
+        role: targetRole,
+      },
+      select: {
+        id: true,
+        nim: true,
+        name: true,
+        email: true,
+        role: true,
+      },
+    });
+
+    return res.json({
+      message: `Data anggota ${updated.name} berhasil diperbarui.`,
+      user: updated,
+    });
+  } catch (error) {
+    console.error('Admin update user error:', error);
+    return res.status(500).json({ message: 'Gagal memperbarui data anggota kelas.' });
+  }
+});
+
+// Reset Member Password (Ketua Kelas only)
+router.post(
+  '/users/:id/reset-password',
+  authenticateToken,
+  requireRole('KETUA_KELAS'),
+  async (req, res) => {
+    try {
+      const userId = Number(req.params.id);
+      const { newPassword } = req.body;
+
+      const user = await prisma.user.findUnique({ where: { id: userId } });
+      if (!user) {
+        return res.status(404).json({ message: 'Anggota kelas tidak ditemukan.' });
+      }
+
+      const targetPassword =
+        newPassword && String(newPassword).trim().length >= 6
+          ? String(newPassword).trim()
+          : 'password123';
+
+      const passwordHash = await bcrypt.hash(targetPassword, 10);
+
+      await prisma.user.update({
+        where: { id: userId },
+        data: { passwordHash },
+      });
+
+      return res.json({
+        message: `Kata sandi ${user.name} (${user.nim}) berhasil di-reset menjadi: ${targetPassword}`,
+        resetPasswordTo: targetPassword,
+      });
+    } catch (error) {
+      console.error('Admin reset password error:', error);
+      return res.status(500).json({ message: 'Gagal me-reset kata sandi anggota.' });
+    }
+  }
+);
+
+// Delete Class Member (Ketua Kelas only)
+router.delete('/users/:id', authenticateToken, requireRole('KETUA_KELAS'), async (req, res) => {
+  try {
+    const userId = Number(req.params.id);
+
+    if (userId === req.user.id) {
+      return res.status(400).json({
+        message: 'Anda tidak dapat menghapus akun Anda sendiri yang sedang digunakan.',
+      });
+    }
+
+    const existing = await prisma.user.findUnique({ where: { id: userId } });
+    if (!existing) {
+      return res.status(404).json({ message: 'Anggota kelas tidak ditemukan.' });
+    }
+
+    await prisma.user.delete({ where: { id: userId } });
+
+    return res.json({
+      message: `Akun anggota ${existing.name} (${existing.nim}) berhasil dihapus dari kelas.`,
+    });
+  } catch (error) {
+    console.error('Admin delete user error:', error);
+    return res.status(500).json({ message: 'Gagal menghapus anggota kelas.' });
   }
 });
 

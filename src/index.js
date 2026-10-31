@@ -20,6 +20,7 @@ import assignmentRoutes from './routes/assignment.routes.js';
 import announcementRoutes from './routes/announcement.routes.js';
 import scheduleRoutes from './routes/schedule.routes.js';
 import quizRoutes from './routes/quiz.routes.js';
+import cashRoutes from './routes/cash.routes.js';
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -46,6 +47,7 @@ app.use('/api/assignments', assignmentRoutes);
 app.use('/api/announcements', announcementRoutes);
 app.use('/api/schedules', scheduleRoutes);
 app.use('/api/quiz', quizRoutes);
+app.use('/api/cash', cashRoutes);
 
 // Serve Client Static Assets in Production (React Vite Build)
 const clientDistPath = path.resolve(__dirname, '../../client/dist');

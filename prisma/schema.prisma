@@ -9,6 +9,7 @@ generator client {
 
 enum Role {
   KETUA_KELAS
+  BENDAHARA
   PJ_MATKUL
   MAHASISWA
 }
@@ -46,6 +47,10 @@ model User {
   createdQuestions   Question[]
   quizAttempts       QuizAttempt[]
   createdAgendas     ClassAgenda[]
+  createdCashPeriods   CashPeriod[]      @relation("CreatedCashPeriods")
+  cashPayments         CashPayment[]     @relation("StudentCashPayments")
+  recordedCashPayments CashPayment[]     @relation("RecordedCashPayments")
+  cashTransactions     CashTransaction[] @relation("CreatedCashTransactions")
 
   @@map("users")
 }
@@ -301,4 +306,59 @@ model QuizAnswer {
   question Question    @relation(fields: [questionId], references: [id], onDelete: Cascade)
 
   @@map("quiz_answers")
+}
+
+model CashPeriod {
+  id          Int       @id @default(autoincrement())
+  title       String
+  category    String    @default("MINGGUAN") // "MINGGUAN", "BULANAN", "INSIDENTAL"
+  amount      Int       @default(5000)
+  dueDate     DateTime?
+  notes       String?   @db.Text
+  isActive    Boolean   @default(true)
+  createdById Int
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  createdBy User          @relation("CreatedCashPeriods", fields: [createdById], references: [id], onDelete: Cascade)
+  payments  CashPayment[]
+
+  @@map("cash_periods")
+}
+
+model CashPayment {
+  id            Int      @id @default(autoincrement())
+  periodId      Int
+  userId        Int
+  amountPaid    Int      @default(0)
+  paymentMethod String   @default("TUNAI") // "TUNAI", "TRANSFER", "QRIS"
+  note          String?  @db.Text
+  paidAt        DateTime @default(now())
+  recordedById  Int?
+  updatedAt     DateTime @updatedAt
+
+  period     CashPeriod @relation(fields: [periodId], references: [id], onDelete: Cascade)
+  user       User       @relation("StudentCashPayments", fields: [userId], references: [id], onDelete: Cascade)
+  recordedBy User?      @relation("RecordedCashPayments", fields: [recordedById], references: [id], onDelete: SetNull)
+
+  @@unique([periodId, userId])
+  @@map("cash_payments")
+}
+
+model CashTransaction {
+  id            Int      @id @default(autoincrement())
+  type          String   @default("EXPENSE") // "INCOME" atau "EXPENSE"
+  category      String   @default("KEPERLUAN_KELAS") // "FOTOKOPI_PRINT", "PERLENGKAPAN", "KEGIATAN", "KONSUMSI", "PEMASUKAN_LAIN", "LAINNYA"
+  title         String
+  amount        Int
+  date          DateTime @default(now())
+  paymentMethod String   @default("TUNAI") // "TUNAI", "TRANSFER", "QRIS"
+  notes         String?  @db.Text
+  createdById   Int
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  createdBy User @relation("CreatedCashTransactions", fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@map("cash_transactions")
 }
